@@ -1,0 +1,15 @@
+spring:
+  profiles:
+    active: awss3
+  cloud:
+    config:
+      server:
+        awss3:
+          region: ap-southeast-1
+          bucket: arun-config-server
+logging:
+  level:
+    com.amazonaws: DEBUG
+
+server:
+  port: 8888
