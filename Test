@@ -1,0 +1,86 @@
+import java.io.BufferedWriter;
+
+import java.io.File;
+
+import java.io.FileWriter;
+
+import java.io.IOException;
+
+import java.sql.*;
+
+public class DataProcessingProgram {
+
+    public static void main(String[] args) {
+
+        String baseOutputPath = "output";
+
+        long maxFileSize = 1024 * 1024; // Maximum file size in bytes
+
+        try (Connection connection = DriverManager.getConnection("jdbc:mysql://localhost:3306/mydatabase", "username", "password");
+
+             PreparedStatement mainQuery = connection.prepareStatement("SELECT * FROM main_table");
+
+             ResultSet resultSet = mainQuery.executeQuery()) {
+
+            int fileIndex = 1;
+
+            String outputFilePath = baseOutputPath + "_" + fileIndex + ".txt";
+
+            try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputFilePath))) {
+
+                long currentFileSize = 0;
+
+                while (resultSet.next()) {
+
+                    // Process the current record
+
+                    // ...
+
+                    // Example: Get the record ID
+
+                    int recordId = resultSet.getInt("id");
+
+                    // Write the data to the current file
+
+                    writer.write("Record ID: " + recordId);
+
+                    writer.newLine();
+
+                    // Check the file size and create a new file if necessary
+
+                    currentFileSize = new File(outputFilePath).length();
+
+                    if (currentFileSize >= maxFileSize) {
+
+                        writer.flush(); // Flush the current file writer
+
+                        // Close the current file writer
+
+                        writer.close();
+
+                        // Increment the file index and create a new file
+
+                        fileIndex++;
+
+                        outputFilePath = baseOutputPath + "_" + fileIndex + ".txt";
+
+                        writer = new BufferedWriter(new FileWriter(outputFilePath));
+
+                        currentFileSize = 0; // Reset the current file size
+
+                    }
+
+                }
+
+            }
+
+        } catch (SQLException | IOException e) {
+
+            e.printStackTrace();
+
+        }
+
+    }
+
+}
+
