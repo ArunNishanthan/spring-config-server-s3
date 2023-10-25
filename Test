@@ -1,1 +1,19 @@
-tty
+-- Create the trigger
+CREATE OR REPLACE TRIGGER update_trigger
+AFTER UPDATE ON your_source_table
+FOR EACH ROW
+BEGIN
+  IF :new.field_name = 'true' THEN
+    -- Perform the upsert operation
+    MERGE INTO your_destination_table dest
+    USING (SELECT :new.primary_key, :new.field_name, ... -- other columns
+           FROM dual) src
+    ON (dest.primary_key = src.primary_key)
+    WHEN MATCHED THEN
+      UPDATE SET dest.field_name = src.field_name, ... -- other columns to update
+    WHEN NOT MATCHED THEN
+      INSERT (primary_key, field_name, ... -- other columns)
+      VALUES (src.primary_key, src.field_name, ... -- other values);
+  END IF;
+END;
+/
