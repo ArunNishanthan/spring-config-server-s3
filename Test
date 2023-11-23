@@ -1,1 +1,44 @@
-String.format("#{T(java.lang.String).format('\\d+\\.\\d{1,%d
+import org.springframework.expression.ExpressionParser;
+import org.springframework.expression.spel.standard.SpelExpressionParser;
+
+import java.util.HashMap;
+import java.util.Map;
+
+public class CurrencyValidator {
+
+    private static final Map<String, Integer> currencyDecimalMap = new HashMap<>();
+
+    static {
+        // Populate the map with valid currencies and their decimal points
+        currencyDecimalMap.put("USD", 2);
+        currencyDecimalMap.put("EUR", 2);
+        // Add more currencies as needed
+    }
+
+    public static boolean validateDecimalPoint(String currency, double value) {
+        if (currencyDecimalMap.containsKey(currency)) {
+            int allowedDecimalPoints = currencyDecimalMap.get(currency);
+
+            // Use SpEL to create the regex dynamically
+            String regex = String.format("#{T(java.lang.String).format('\\d+\\.\\d{1,%d}', %d)}", allowedDecimalPoints, value);
+            ExpressionParser parser = new SpelExpressionParser();
+            boolean isValid = parser.parseExpression(regex).getValue(Boolean.class);
+
+            return isValid;
+        }
+        return false; // Currency not found in the map
+    }
+
+    public static void main(String[] args) {
+        // Example usage
+        String currency = "USD";
+        double value = 123.45;
+
+        if (validateDecimalPoint(currency, value)) {
+            System.out.println("Valid input");
+        } else {
+            System.out.println("Invalid input");
+        }
+    }
+}
+
