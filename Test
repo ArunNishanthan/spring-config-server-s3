@@ -1,55 +1,76 @@
 #!/bin/bash
 
-# Define the OpenShift cluster URLs and corresponding namespaces
-declare -A CLUSTERS
-CLUSTERS["https://cluster1.openshift.com:8443"]="namespace1 namespace2"
-CLUSTERS["https://cluster2.openshift.com:8443"]="namespace3 namespace4"
+# Ensure the script exits on any error
+set -e
 
-# Define tokens for each cluster (replace with your actual tokens)
-declare -A TOKENS
-TOKENS["https://cluster1.openshift.com:8443"]="your-cluster1-token"
-TOKENS["https://cluster2.openshift.com:8443"]="your-cluster2-token"
+# Variables
+IMAGE="alpine"
+TAG="latest"
+REGISTRY="https://registry.hub.docker.com"
+OUTPUT_DIR="./docker_image"
+MANIFEST_URL="${REGISTRY}/v2/library/${IMAGE}/manifests/${TAG}"
 
-# Define the label selector (replace with your actual label selector)
-LABEL_SELECTOR="your-label-key=your-label-value"
+# Step 1: Fetch image manifest
+echo "Fetching manifest for ${IMAGE}:${TAG}..."
+MANIFEST=$(curl -sSL ${MANIFEST_URL})
+CONFIG_DIGEST=$(echo $MANIFEST | jq -r '.config.digest')
+LAYERS=$(echo $MANIFEST | jq -r '.layers[].digest')
 
-# Function to fetch and process logs for pods
-fetch_and_process_logs() {
-    local cluster_url=$1
-    local namespace=$2
-    local token=$3
+# Step 2: Download image layers
+mkdir -p ${OUTPUT_DIR}
+cd ${OUTPUT_DIR}
+echo "Downloading image layers..."
 
-    # Get the list of pods in the current namespace with the specific label
-    local api_url="$cluster_url/api/v1/namespaces/$namespace/pods?labelSelector=$LABEL_SELECTOR"
-    local pods_json=$(curl -s -H "Authorization: Bearer $token" -k $api_url)
-
-    # Extract pod names using awk and exclude lines containing "resourceVersion"
-    local pod_names=$(echo "$pods_json" | awk -F '"' '/"metadata":/{getline; if (!/"resourceVersion":/) print $4}')
-
-    # Loop through each pod and fetch logs
-    for pod in $pod_names; do
-        local log_url="$cluster_url/api/v1/namespaces/$namespace/pods/$pod/log"
-        echo "Logs for pod: $pod in namespace: $namespace on cluster: $cluster_url"
-        local logs=$(curl -s -H "Authorization: Bearer $token" -k $log_url)
-        local log_file="${cluster_url//[:\/]/_}_${namespace}_${pod}.log"
-        echo "$logs" > "$log_file"
-        echo "Logs saved to $log_file"
-    done
-}
-
-# Loop through each cluster
-for cluster_url in "${!CLUSTERS[@]}"; do
-    echo "Processing cluster: $cluster_url"
-    local token=${TOKENS[$cluster_url]}
-    
-    # Get the namespaces for the current cluster
-    local namespaces=${CLUSTERS[$cluster_url]}
-    
-    # Loop through each namespace in the current cluster
-    for namespace in $namespaces; do
-        echo "Fetching pods for namespace: $namespace in cluster: $cluster_url"
-        
-        # Fetch and process logs for pods
-        fetch_and_process_logs "$cluster_url" "$namespace" "$token"
-    done
+for LAYER in $LAYERS; do
+  LAYER_FILE=$(echo $LAYER | sed 's/:/_/')
+  curl -sSL "${REGISTRY}/v2/library/${IMAGE}/blobs/${LAYER}" -o "${LAYER_FILE}.tar"
+  echo "${LAYER_FILE}.tar downloaded."
 done
+
+# Download config
+CONFIG_FILE=$(echo $CONFIG_DIGEST | sed 's/:/_/')
+curl -sSL "${REGISTRY}/v2/library/${IMAGE}/blobs/${CONFIG_DIGEST}" -o "${CONFIG_FILE}.json"
+
+# Step 3: Create manifest.json
+echo "Creating manifest.json..."
+cat <<EOF > manifest.json
+[
+  {
+    "Config": "${CONFIG_FILE}.json",
+    "RepoTags": ["${IMAGE}:${TAG}"],
+    "Layers": [
+EOF
+
+for LAYER in $LAYERS; do
+  LAYER_FILE=$(echo $LAYER | sed 's/:/_/')
+  echo "    \"${LAYER_FILE}.tar\"," >> manifest.json
+done
+
+# Remove the last comma and close JSON
+sed -i '$ s/,$//' manifest.json
+echo "  ]" >> manifest.json
+echo "}" >> manifest.json
+echo "]" >> manifest.json
+
+# Step 4: Create repositories file
+echo "Creating repositories..."
+cat <<EOF > repositories
+{
+  "${IMAGE}": {
+    "${TAG}": "$(echo $MANIFEST | jq -r '.config.digest')"
+  }
+}
+EOF
+
+# Step 5: Create final tarball
+cd ..
+TAR_FILE="${IMAGE}_${TAG}.tar"
+tar -cf ${TAR_FILE} -C ${OUTPUT_DIR} .
+
+# Step 6: Load image into Docker
+echo "Loading image into Docker..."
+docker load -i ${TAR_FILE}
+
+# Clean up
+rm -rf ${OUTPUT_DIR}
+echo "Done! Image ${IMAGE}:${TAG} has been loaded into Docker."
