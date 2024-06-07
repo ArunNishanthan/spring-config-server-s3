@@ -13,50 +13,43 @@ TOKENS["https://cluster2.openshift.com:8443"]="your-cluster2-token"
 # Define the label selector (replace with your actual label selector)
 LABEL_SELECTOR="your-label-key=your-label-value"
 
-# Function to parse pod names from JSON
-parse_pod_names() {
-    local json=$1
-    local pod_names=()
+# Function to fetch and process logs for pods
+fetch_and_process_logs() {
+    local cluster_url=$1
+    local namespace=$2
+    local token=$3
 
-    # Remove leading and trailing whitespace
-    json=$(echo "$json" | tr -d '[:space:]')
+    # Get the list of pods in the current namespace with the specific label
+    local api_url="$cluster_url/api/v1/namespaces/$namespace/pods?labelSelector=$LABEL_SELECTOR"
+    local pods_json=$(curl -s -H "Authorization: Bearer $token" -k $api_url)
 
-    # Extract pod names
-    while [[ $json =~ "\"name\":\"([^\"]+)" ]]; do
-        pod_names+=("${BASH_REMATCH[1]}")
-        json=${json#*\"name\":\"${BASH_REMATCH[1]}}
+    # Extract pod names using awk
+    local pod_names=$(echo "$pods_json" | awk -F '"' '/"metadata":/{getline;print $4}')
+
+    # Loop through each pod and fetch logs
+    for pod in $pod_names; do
+        local log_url="$cluster_url/api/v1/namespaces/$namespace/pods/$pod/log"
+        echo "Logs for pod: $pod in namespace: $namespace on cluster: $cluster_url"
+        local logs=$(curl -s -H "Authorization: Bearer $token" -k $log_url)
+        local log_file="${cluster_url//[:\/]/_}_${namespace}_${pod}.log"
+        echo "$logs" > "$log_file"
+        echo "Logs saved to $log_file"
     done
-
-    echo "${pod_names[@]}"
 }
 
 # Loop through each cluster
-for CLUSTER_URL in "${!CLUSTERS[@]}"; do
-    echo "Processing cluster: $CLUSTER_URL"
-    TOKEN=${TOKENS[$CLUSTER_URL]}
+for cluster_url in "${!CLUSTERS[@]}"; do
+    echo "Processing cluster: $cluster_url"
+    local token=${TOKENS[$cluster_url]}
     
     # Get the namespaces for the current cluster
-    NAMESPACES=${CLUSTERS[$CLUSTER_URL]}
+    local namespaces=${CLUSTERS[$cluster_url]}
     
     # Loop through each namespace in the current cluster
-    for NAMESPACE in $NAMESPACES; do
-        echo "Fetching pods for namespace: $NAMESPACE in cluster: $CLUSTER_URL"
+    for namespace in $namespaces; do
+        echo "Fetching pods for namespace: $namespace in cluster: $cluster_url"
         
-        # Get the list of pods in the current namespace with the specific label
-        API_URL="$CLUSTER_URL/api/v1/namespaces/$NAMESPACE/pods?labelSelector=$LABEL_SELECTOR"
-        PODS_JSON=$(curl -s -H "Authorization: Bearer $TOKEN" -k $API_URL)
-        
-        # Extract pod names using the parse_pod_names function
-        POD_NAMES=$(parse_pod_names "$PODS_JSON")
-        
-        # Loop through each pod and fetch logs
-        for POD in $POD_NAMES; do
-            LOG_URL="$CLUSTER_URL/api/v1/namespaces/$NAMESPACE/pods/$POD/log"
-            echo "Logs for pod: $POD in namespace: $NAMESPACE on cluster: $CLUSTER_URL"
-            LOGS=$(curl -s -H "Authorization: Bearer $TOKEN" -k $LOG_URL)
-            LOG_FILE="${CLUSTER_URL//[:\/]/_}_${NAMESPACE}_${POD}.log"
-            echo "$LOGS" > $LOG_FILE
-            echo "Logs saved to $LOG_FILE"
-        done
+        # Fetch and process logs for pods
+        fetch_and_process_logs "$cluster_url" "$namespace" "$token"
     done
 done
