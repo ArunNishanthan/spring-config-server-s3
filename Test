@@ -13,16 +13,25 @@ TOKENS["https://cluster2.openshift.com:8443"]="your-cluster2-token"
 # Define the label selector (replace with your actual label selector)
 LABEL_SELECTOR="your-label-key=your-label-value"
 
-# Function to parse pod names from JSON
+# Function to parse pod names from JSON without jq
 parse_pod_names() {
     local json=$1
     local pod_names=()
 
-    while read -r line; do
-        if [[ $line =~ \"name\":\"([^\"]+)\" ]]; then
-            pod_names+=("${BASH_REMATCH[1]}")
+    # Remove leading and trailing whitespace
+    json=$(echo "$json" | tr -d '[:space:]')
+
+    # Remove array brackets and split by }, to iterate over each pod
+    pods=$(echo "$json" | sed 's/.*"items":\[\(.*\)\].*/\1/' | tr '}' '\n')
+
+    # Loop over each pod
+    while read -r pod; do
+        # Extract pod name
+        pod_name=$(echo "$pod" | sed 's/.*"name":"\([^"]*\)".*/\1/')
+        if [ -n "$pod_name" ]; then
+            pod_names+=("$pod_name")
         fi
-    done < <(echo "$json" | tr ',' '\n')
+    done <<< "$pods"
 
     echo "${pod_names[@]}"
 }
@@ -41,7 +50,7 @@ for CLUSTER_URL in "${!CLUSTERS[@]}"; do
         
         # Get the list of pods in the current namespace with the specific label
         API_URL="$CLUSTER_URL/api/v1/namespaces/$NAMESPACE/pods?labelSelector=$LABEL_SELECTOR"
-        PODS_JSON=$(curl -H "Authorization: Bearer $TOKEN" -k $API_URL)
+        PODS_JSON=$(curl -s -H "Authorization: Bearer $TOKEN" -k $API_URL)
         
         # Extract pod names using the parse_pod_names function
         POD_NAMES=$(parse_pod_names "$PODS_JSON")
@@ -50,7 +59,7 @@ for CLUSTER_URL in "${!CLUSTERS[@]}"; do
         for POD in $POD_NAMES; do
             LOG_URL="$CLUSTER_URL/api/v1/namespaces/$NAMESPACE/pods/$POD/log"
             echo "Logs for pod: $POD in namespace: $NAMESPACE on cluster: $CLUSTER_URL"
-            LOGS=$(curl -H "Authorization: Bearer $TOKEN" -k $LOG_URL)
+            LOGS=$(curl -s -H "Authorization: Bearer $TOKEN" -k $LOG_URL)
             LOG_FILE="${CLUSTER_URL//[:\/]/_}_${NAMESPACE}_${POD}.log"
             echo "$LOGS" > $LOG_FILE
             echo "Logs saved to $LOG_FILE"
