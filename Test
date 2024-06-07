@@ -13,15 +13,26 @@ TOKENS["https://cluster2.openshift.com:8443"]="your-cluster2-token"
 # Define the label selector (replace with your actual label selector)
 LABEL_SELECTOR="your-label-key=your-label-value"
 
-# Function to fetch pod names from JSON using Python
-fetch_pod_names() {
+# Function to parse pod names from JSON
+parse_pod_names() {
     local json=$1
-    python - <<EOF
-import json
-data = json.loads('$json')
-pod_names = [item['metadata']['name'] for item in data['items']]
-print('\n'.join(pod_names))
-EOF
+    local pod_names=()
+
+    # Remove leading and trailing whitespace
+    json=$(echo "$json" | tr -d '[:space:]')
+
+    # Split JSON by comma and iterate over each item
+    IFS=',' read -r -a items <<< "$json"
+    for item in "${items[@]}"; do
+        # Check if the item contains "name" field
+        if [[ $item == *"\"name\":"* ]]; then
+            # Extract pod name and remove surrounding quotes
+            pod_name=$(echo "$item" | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')
+            pod_names+=("$pod_name")
+        fi
+    done
+
+    echo "${pod_names[@]}"
 }
 
 # Loop through each cluster
@@ -40,8 +51,8 @@ for CLUSTER_URL in "${!CLUSTERS[@]}"; do
         API_URL="$CLUSTER_URL/api/v1/namespaces/$NAMESPACE/pods?labelSelector=$LABEL_SELECTOR"
         PODS_JSON=$(curl -s -H "Authorization: Bearer $TOKEN" -k $API_URL)
         
-        # Extract pod names using the fetch_pod_names function
-        POD_NAMES=$(fetch_pod_names "$PODS_JSON")
+        # Extract pod names using the parse_pod_names function
+        POD_NAMES=$(parse_pod_names "$PODS_JSON")
         
         # Loop through each pod and fetch logs
         for POD in $POD_NAMES; do
