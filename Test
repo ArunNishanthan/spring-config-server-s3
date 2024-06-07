@@ -13,6 +13,20 @@ TOKENS["https://cluster2.openshift.com:8443"]="your-cluster2-token"
 # Define the label selector (replace with your actual label selector)
 LABEL_SELECTOR="your-label-key=your-label-value"
 
+# Function to parse pod names from JSON
+parse_pod_names() {
+    local json=$1
+    local pod_names=()
+
+    while read -r line; do
+        if [[ $line =~ \"name\":\"([^\"]+)\" ]]; then
+            pod_names+=("${BASH_REMATCH[1]}")
+        fi
+    done < <(echo "$json" | tr ',' '\n')
+
+    echo "${pod_names[@]}"
+}
+
 # Loop through each cluster
 for CLUSTER_URL in "${!CLUSTERS[@]}"; do
     echo "Processing cluster: $CLUSTER_URL"
@@ -29,8 +43,8 @@ for CLUSTER_URL in "${!CLUSTERS[@]}"; do
         API_URL="$CLUSTER_URL/api/v1/namespaces/$NAMESPACE/pods?labelSelector=$LABEL_SELECTOR"
         PODS_JSON=$(curl -H "Authorization: Bearer $TOKEN" -k $API_URL)
         
-        # Extract pod names using bash built-in commands
-        POD_NAMES=$(echo "$PODS_JSON" | tr -d '\n' | sed 's/.*"items":\[//' | sed 's/\]\}.*/]/' | tr '}' '\n' | awk -F'"' '/"name":/ {print $(NF-1)}')
+        # Extract pod names using the parse_pod_names function
+        POD_NAMES=$(parse_pod_names "$PODS_JSON")
         
         # Loop through each pod and fetch logs
         for POD in $POD_NAMES; do
