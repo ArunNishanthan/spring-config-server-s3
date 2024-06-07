@@ -21,15 +21,10 @@ parse_pod_names() {
     # Remove leading and trailing whitespace
     json=$(echo "$json" | tr -d '[:space:]')
 
-    # Split JSON by comma and iterate over each item
-    IFS=',' read -r -a items <<< "$json"
-    for item in "${items[@]}"; do
-        # Check if the item contains "name" field
-        if [[ $item == *"\"name\":"* ]]; then
-            # Extract pod name and remove surrounding quotes
-            pod_name=$(echo "$item" | sed -n 's/.*"name":"\([^"]*\)".*/\1/p')
-            pod_names+=("$pod_name")
-        fi
+    # Extract pod names
+    while [[ $json =~ "\"name\":"([^,]+) ]]; do
+        pod_names+=("${BASH_REMATCH[1]}")
+        json=${json#*"\"name\":"${BASH_REMATCH[1]}}
     done
 
     echo "${pod_names[@]}"
