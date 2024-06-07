@@ -1,1 +1,39 @@
+# Define the OpenShift cluster URLs and corresponding namespaces
+declare -A CLUSTERS
+CLUSTERS["https://cluster1.openshift.com:8443"]="namespace1 namespace2"
+CLUSTERS["https://cluster2.openshift.com:8443"]="namespace3 namespace4"
+
+# Define tokens for each cluster (replace with your actual tokens)
+declare -A TOKENS
+TOKENS["https://cluster1.openshift.com:8443"]="your-cluster1-token"
+TOKENS["https://cluster2.openshift.com:8443"]="your-cluster2-token"
+
+# Loop through each cluster
+for CLUSTER_URL in "${!CLUSTERS[@]}"; do
+    echo "Processing cluster: $CLUSTER_URL"
+    TOKEN=${TOKENS[$CLUSTER_URL]}
+    
+    # Get the namespaces for the current cluster
+    NAMESPACES=${CLUSTERS[$CLUSTER_URL]}
+    
+    # Loop through each namespace in the current cluster
+    for NAMESPACE in $NAMESPACES; do
+        echo "Fetching pods for namespace: $NAMESPACE in cluster: $CLUSTER_URL"
+        
+        # Get the list of pods in the current namespace
+        API_URL="$CLUSTER_URL/api/v1/namespaces/$NAMESPACE/pods"
+        PODS_JSON=$(curl -H "Authorization: Bearer $TOKEN" -k $API_URL)
+        
+        # Extract pod names using grep and awk
+        POD_NAMES=$(echo $PODS_JSON | grep -oP '"name":\s*"\K[^"]+')
+        
+        # Loop through each pod and fetch logs
+        for POD in $POD_NAMES; do
+            LOG_URL="$CLUSTER_URL/api/v1/namespaces/$NAMESPACE/pods/$POD/log"
+            echo "Logs for pod: $POD in namespace: $NAMESPACE on cluster: $CLUSTER_URL"
+            curl -H "Authorization: Bearer $TOKEN" -k $LOG_URL
+            echo -e "\n"
+        done
+    done
+done
 
