@@ -23,8 +23,8 @@ fetch_and_process_logs() {
     local api_url="$cluster_url/api/v1/namespaces/$namespace/pods?labelSelector=$LABEL_SELECTOR"
     local pods_json=$(curl -s -H "Authorization: Bearer $token" -k $api_url)
 
-    # Extract pod names using awk
-    local pod_names=$(echo "$pods_json" | awk -F '"' '/"metadata":/{getline;print $4}')
+    # Extract pod names using awk and exclude lines containing "resourceVersion"
+    local pod_names=$(echo "$pods_json" | awk -F '"' '/"metadata":/{getline; if (!/"resourceVersion":/) print $4}')
 
     # Loop through each pod and fetch logs
     for pod in $pod_names; do
