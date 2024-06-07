@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # Define the OpenShift cluster URLs and corresponding namespaces
 declare -A CLUSTERS
 CLUSTERS["https://cluster1.openshift.com:8443"]="namespace1 namespace2"
@@ -7,6 +9,9 @@ CLUSTERS["https://cluster2.openshift.com:8443"]="namespace3 namespace4"
 declare -A TOKENS
 TOKENS["https://cluster1.openshift.com:8443"]="your-cluster1-token"
 TOKENS["https://cluster2.openshift.com:8443"]="your-cluster2-token"
+
+# Define the label selector (replace with your actual label selector)
+LABEL_SELECTOR="your-label-key=your-label-value"
 
 # Loop through each cluster
 for CLUSTER_URL in "${!CLUSTERS[@]}"; do
@@ -20,8 +25,8 @@ for CLUSTER_URL in "${!CLUSTERS[@]}"; do
     for NAMESPACE in $NAMESPACES; do
         echo "Fetching pods for namespace: $NAMESPACE in cluster: $CLUSTER_URL"
         
-        # Get the list of pods in the current namespace
-        API_URL="$CLUSTER_URL/api/v1/namespaces/$NAMESPACE/pods"
+        # Get the list of pods in the current namespace with the specific label
+        API_URL="$CLUSTER_URL/api/v1/namespaces/$NAMESPACE/pods?labelSelector=$LABEL_SELECTOR"
         PODS_JSON=$(curl -H "Authorization: Bearer $TOKEN" -k $API_URL)
         
         # Extract pod names using grep and awk
@@ -31,9 +36,9 @@ for CLUSTER_URL in "${!CLUSTERS[@]}"; do
         for POD in $POD_NAMES; do
             LOG_URL="$CLUSTER_URL/api/v1/namespaces/$NAMESPACE/pods/$POD/log"
             echo "Logs for pod: $POD in namespace: $NAMESPACE on cluster: $CLUSTER_URL"
-            curl -H "Authorization: Bearer $TOKEN" -k $LOG_URL
-            echo -e "\n"
+            LOGS=$(curl -H "Authorization: Bearer $TOKEN" -k $LOG_URL)
+            echo "$LOGS" > "${CLUSTER_URL//[:\/]/_}_${NAMESPACE}_${POD}.log"
+            echo "Logs saved to ${CLUSTER_URL//[:\/]/_}_${NAMESPACE}_${POD}.log"
         done
     done
 done
-
