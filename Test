@@ -22,9 +22,9 @@ parse_pod_names() {
     json=$(echo "$json" | tr -d '[:space:]')
 
     # Extract pod names
-    while [[ $json =~ "\"name\":"([^,]+) ]]; do
+    while [[ $json =~ "\"name\":\"([^\"]+)" ]]; do
         pod_names+=("${BASH_REMATCH[1]}")
-        json=${json#*"\"name\":"${BASH_REMATCH[1]}}
+        json=${json#*\"name\":\"${BASH_REMATCH[1]}}
     done
 
     echo "${pod_names[@]}"
