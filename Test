@@ -1,1 +1,56 @@
+#!/bin/bash
+
+# Configuration
+API_TOKEN="sha256~exampleToken"
+API_SERVER="api.openshift.example.com:6443"
+NAMESPACE="myproject"
+LABEL="app=myapp"
+
+# Function to get deployments by label
+get_deployments_by_label() {
+  local token=$1
+  local server=$2
+  local namespace=$3
+  local label=$4
+
+  echo "Fetching deployments with label '$label' in namespace '$namespace'..."
+
+  deployments=$(curl -k -s -H "Authorization: Bearer $token" \
+    "https://$server/apis/apps/v1/namespaces/$namespace/deployments?labelSelector=$label" \
+    | jq -r '.items[].metadata.name')
+
+  if [[ $? -ne 0 ]]; then
+    echo "Failed to fetch deployments."
+    exit 1
+  fi
+
+  echo $deployments
+}
+
+# Function to delete a deployment
+delete_deployment() {
+  local token=$1
+  local server=$2
+  local namespace=$3
+  local appname=$4
+
+  echo "Deleting deployment '$appname' in namespace '$namespace'..."
+
+  response=$(curl -k -X DELETE -H "Authorization: Bearer $token" \
+    "https://$server/apis/apps/v1/namespaces/$namespace/deployments/$appname")
+
+  if [[ $? -ne 0 ]]; then
+    echo "Failed to delete deployment '$appname'."
+    exit 1
+  fi
+
+  echo "Response from server: $response"
+}
+
+# Main script
+deployments=$(get_deployments_by_label $API_TOKEN $API_SERVER $NAMESPACE $LABEL)
+
+for deployment in $deployments; do
+  delete_deployment $API_TOKEN $API_SERVER $NAMESPACE $deployment
+done
 
