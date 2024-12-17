@@ -1,109 +1,32 @@
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Update;
-import org.springframework.stereotype.Service;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.*;
 
-@Service
-public class MongoDAGService {
+@RestController
+public class DAGController {
 
     @Autowired
-    private MongoTemplate mongoTemplate;
+    private MongoDAGService mongoDAGService;
 
-    // Step 1: Batch insert transactions
-    public void batchInsertTransactions(Map<String, Set<String>> transactions) {
-        List<Map<String, Object>> transactionDocs = new ArrayList<>();
+    @GetMapping("/sync")
+    public String syncTransactions() {
+        Map<String, Set<String>> transactions = new LinkedHashMap<>();
+        transactions.put("T1", new HashSet<>(Arrays.asList("a1", "a2", "a3")));
+        transactions.put("T2", new HashSet<>(Arrays.asList("a2", "a4")));
+        transactions.put("T3", new HashSet<>(Arrays.asList("a3", "a5")));
+        transactions.put("T4", new HashSet<>(Arrays.asList("a4", "a6")));
 
-        for (Map.Entry<String, Set<String>> entry : transactions.entrySet()) {
-            Map<String, Object> transactionDoc = new HashMap<>();
-            transactionDoc.put("_id", entry.getKey());
-            transactionDoc.put("accounts", entry.getValue());
-            transactionDoc.put("createdAt", new Date());
-            transactionDocs.add(transactionDoc);
-        }
+        // Step 1: Batch insert transactions
+        mongoDAGService.batchInsertTransactions(transactions);
 
-        mongoTemplate.getCollection("transactions").insertMany(transactionDocs);
-        System.out.println("Inserted transactions in batch.");
-    }
+        // Step 2: Batch insert dependencies
+        mongoDAGService.batchInsertDependencies(transactions);
 
-    // Step 2: Detect and insert dependencies
-    public void batchInsertDependencies(Map<String, Set<String>> transactions) {
-        List<Map<String, Object>> dependencyDocs = new ArrayList<>();
+        // Step 3: Get topological order
+        List<String> order = mongoDAGService.getTopologicalOrder();
 
-        for (Map.Entry<String, Set<String>> entry : transactions.entrySet()) {
-            String newTransactionId = entry.getKey();
-            Set<String> accounts = entry.getValue();
-
-            // Find existing transactions with overlapping accounts
-            Query query = new Query(Criteria.where("accounts").in(accounts)
-                    .and("_id").ne(newTransactionId));
-            List<Map> existingTransactions = mongoTemplate.find(query, Map.class, "transactions");
-
-            // Create dependency edges
-            for (Map existingTransaction : existingTransactions) {
-                String existingTransactionId = (String) existingTransaction.get("_id");
-
-                Map<String, Object> dependency = new HashMap<>();
-                dependency.put("fromTransaction", existingTransactionId);
-                dependency.put("toTransaction", newTransactionId);
-                dependencyDocs.add(dependency);
-
-                System.out.println("Detected dependency: " + existingTransactionId + " -> " + newTransactionId);
-            }
-        }
-
-        if (!dependencyDocs.isEmpty()) {
-            mongoTemplate.getCollection("dependencies").insertMany(dependencyDocs);
-            System.out.println("Inserted dependencies in batch.");
-        }
-    }
-
-    // Step 3: Topological sorting to determine sync order
-    public List<String> getTopologicalOrder() {
-        Map<String, List<String>> graph = new HashMap<>();
-        Map<String, Integer> inDegree = new HashMap<>();
-
-        // Fetch dependencies and build graph
-        List<Map> dependencies = mongoTemplate.findAll(Map.class, "dependencies");
-        for (Map dependency : dependencies) {
-            String from = (String) dependency.get("fromTransaction");
-            String to = (String) dependency.get("toTransaction");
-
-            graph.computeIfAbsent(from, k -> new ArrayList<>()).add(to);
-            inDegree.put(to, inDegree.getOrDefault(to, 0) + 1);
-            inDegree.putIfAbsent(from, 0);
-        }
-
-        // Kahn's Algorithm for Topological Sorting
-        Queue<String> queue = new LinkedList<>();
-        for (Map.Entry<String, Integer> entry : inDegree.entrySet()) {
-            if (entry.getValue() == 0) {
-                queue.add(entry.getKey());
-            }
-        }
-
-        List<String> sortedOrder = new ArrayList<>();
-        while (!queue.isEmpty()) {
-            String current = queue.poll();
-            sortedOrder.add(current);
-
-            if (graph.containsKey(current)) {
-                for (String neighbor : graph.get(current)) {
-                    inDegree.put(neighbor, inDegree.get(neighbor) - 1);
-                    if (inDegree.get(neighbor) == 0) {
-                        queue.add(neighbor);
-                    }
-                }
-            }
-        }
-
-        if (sortedOrder.size() != inDegree.size()) {
-            throw new IllegalStateException("Cycle detected in the DAG!");
-        }
-
-        return sortedOrder;
+        return "Topological Order: " + order.toString();
     }
 }
