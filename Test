@@ -1,55 +1,109 @@
-#!/bin/bash
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.stereotype.Service;
 
-# Configuration
-API_TOKEN="your-api-token"
-API_SERVER="your-openshift-api-server"
-NAMESPACE="your-namespace"
-LABEL="your-label-selector"
+import java.util.*;
 
-# Function to get deployments by label
-get_deployments_by_label() {
-  local token=$1
-  local server=$2
-  local namespace=$3
-  local label=$4
+@Service
+public class MongoDAGService {
 
-  echo "Fetching deployments with label '$label' in namespace '$namespace'..."
+    @Autowired
+    private MongoTemplate mongoTemplate;
 
-  deployments=$(curl -k -s -H "Authorization: Bearer $token" \
-    "https://$server/apis/apps/v1/namespaces/$namespace/deployments?labelSelector=$label" \
-    | grep -oP '(?<="name":")[^"]*')
+    // Step 1: Batch insert transactions
+    public void batchInsertTransactions(Map<String, Set<String>> transactions) {
+        List<Map<String, Object>> transactionDocs = new ArrayList<>();
 
-  if [[ $? -ne 0 ]]; then
-    echo "Failed to fetch deployments."
-    exit 1
-  fi
+        for (Map.Entry<String, Set<String>> entry : transactions.entrySet()) {
+            Map<String, Object> transactionDoc = new HashMap<>();
+            transactionDoc.put("_id", entry.getKey());
+            transactionDoc.put("accounts", entry.getValue());
+            transactionDoc.put("createdAt", new Date());
+            transactionDocs.add(transactionDoc);
+        }
 
-  echo $deployments
+        mongoTemplate.getCollection("transactions").insertMany(transactionDocs);
+        System.out.println("Inserted transactions in batch.");
+    }
+
+    // Step 2: Detect and insert dependencies
+    public void batchInsertDependencies(Map<String, Set<String>> transactions) {
+        List<Map<String, Object>> dependencyDocs = new ArrayList<>();
+
+        for (Map.Entry<String, Set<String>> entry : transactions.entrySet()) {
+            String newTransactionId = entry.getKey();
+            Set<String> accounts = entry.getValue();
+
+            // Find existing transactions with overlapping accounts
+            Query query = new Query(Criteria.where("accounts").in(accounts)
+                    .and("_id").ne(newTransactionId));
+            List<Map> existingTransactions = mongoTemplate.find(query, Map.class, "transactions");
+
+            // Create dependency edges
+            for (Map existingTransaction : existingTransactions) {
+                String existingTransactionId = (String) existingTransaction.get("_id");
+
+                Map<String, Object> dependency = new HashMap<>();
+                dependency.put("fromTransaction", existingTransactionId);
+                dependency.put("toTransaction", newTransactionId);
+                dependencyDocs.add(dependency);
+
+                System.out.println("Detected dependency: " + existingTransactionId + " -> " + newTransactionId);
+            }
+        }
+
+        if (!dependencyDocs.isEmpty()) {
+            mongoTemplate.getCollection("dependencies").insertMany(dependencyDocs);
+            System.out.println("Inserted dependencies in batch.");
+        }
+    }
+
+    // Step 3: Topological sorting to determine sync order
+    public List<String> getTopologicalOrder() {
+        Map<String, List<String>> graph = new HashMap<>();
+        Map<String, Integer> inDegree = new HashMap<>();
+
+        // Fetch dependencies and build graph
+        List<Map> dependencies = mongoTemplate.findAll(Map.class, "dependencies");
+        for (Map dependency : dependencies) {
+            String from = (String) dependency.get("fromTransaction");
+            String to = (String) dependency.get("toTransaction");
+
+            graph.computeIfAbsent(from, k -> new ArrayList<>()).add(to);
+            inDegree.put(to, inDegree.getOrDefault(to, 0) + 1);
+            inDegree.putIfAbsent(from, 0);
+        }
+
+        // Kahn's Algorithm for Topological Sorting
+        Queue<String> queue = new LinkedList<>();
+        for (Map.Entry<String, Integer> entry : inDegree.entrySet()) {
+            if (entry.getValue() == 0) {
+                queue.add(entry.getKey());
+            }
+        }
+
+        List<String> sortedOrder = new ArrayList<>();
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            sortedOrder.add(current);
+
+            if (graph.containsKey(current)) {
+                for (String neighbor : graph.get(current)) {
+                    inDegree.put(neighbor, inDegree.get(neighbor) - 1);
+                    if (inDegree.get(neighbor) == 0) {
+                        queue.add(neighbor);
+                    }
+                }
+            }
+        }
+
+        if (sortedOrder.size() != inDegree.size()) {
+            throw new IllegalStateException("Cycle detected in the DAG!");
+        }
+
+        return sortedOrder;
+    }
 }
-
-# Function to delete a deployment
-delete_deployment() {
-  local token=$1
-  local server=$2
-  local namespace=$3
-  local appname=$4
-
-  echo "Deleting deployment '$appname' in namespace '$namespace'..."
-
-  response=$(curl -k -X DELETE -H "Authorization: Bearer $token" \
-    "https://$server/apis/apps/v1/namespaces/$namespace/deployments/$appname")
-
-  if [[ $? -ne 0 ]]; then
-    echo "Failed to delete deployment '$appname'."
-    exit 1
-  fi
-
-  echo "Response from server: $response"
-}
-
-# Main script
-deployments=$(get_deployments_by_label $API_TOKEN $API_SERVER $NAMESPACE $LABEL)
-
-for deployment in $deployments; do
-  delete_deployment $API_TOKEN $API_SERVER $NAMESPACE $deployment
-done
