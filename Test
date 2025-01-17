@@ -1,26 +1,34 @@
-#!/bin/bash
+import groovy.io.FileType
 
-# Array of folder paths
-folders=("folder1" "folder2" "folder3")
+// Specify the directory to scan
+def rootDir = new File("/path/to/your/directory")
 
-# Iterate through each folder
-for folder in "${folders[@]}"; do
-  # Check if the folder exists
-  if [ -d "$folder" ]; then
-    # Loop through all JSON files in the folder
-    for file in "$folder"/*.json; do
-      # Check if any JSON files exist
-      if [ -f "$file" ]; then
-        # Extract the filename without extension
-        filename=$(basename "$file" .json)
-        # Read the content of the file
-        content=$(<"$file")
-        # Export the filename and content as an environment variable
-        export "$filename"="$content"
-        echo "Exported $filename as environment variable."
-      fi
-    done
-  else
-    echo "Folder $folder does not exist."
-  fi
-done
+if (!rootDir.exists() || !rootDir.isDirectory()) {
+    println "Directory does not exist or is not a directory: ${rootDir}"
+    System.exit(1)
+}
+
+// Loop through all files in the directory and subdirectories
+rootDir.eachFileRecurse(FileType.FILES) { file ->
+    if (file.name.endsWith(".json")) {
+        try {
+            // Read the file content
+            def content = file.text
+            
+            // Get the file name without extension
+            def envKey = file.name.replaceAll(/\.json$/, "")
+            
+            // Set the environment variable
+            System.setProperty(envKey, content)
+            println "Environment variable set: ${envKey}"
+        } catch (Exception e) {
+            println "Failed to process file: ${file.absolutePath}"
+            e.printStackTrace()
+        }
+    }
+}
+
+// Debug: Print all environment variables set
+System.properties.each { key, value ->
+    println "${key} = ${value}"
+}
