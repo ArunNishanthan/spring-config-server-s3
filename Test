@@ -1,32 +1,26 @@
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RestController;
+#!/bin/bash
 
-import java.util.*;
+# Array of folder paths
+folders=("folder1" "folder2" "folder3")
 
-@RestController
-public class DAGController {
-
-    @Autowired
-    private MongoDAGService mongoDAGService;
-
-    @GetMapping("/sync")
-    public String syncTransactions() {
-        Map<String, Set<String>> transactions = new LinkedHashMap<>();
-        transactions.put("T1", new HashSet<>(Arrays.asList("a1", "a2", "a3")));
-        transactions.put("T2", new HashSet<>(Arrays.asList("a2", "a4")));
-        transactions.put("T3", new HashSet<>(Arrays.asList("a3", "a5")));
-        transactions.put("T4", new HashSet<>(Arrays.asList("a4", "a6")));
-
-        // Step 1: Batch insert transactions
-        mongoDAGService.batchInsertTransactions(transactions);
-
-        // Step 2: Batch insert dependencies
-        mongoDAGService.batchInsertDependencies(transactions);
-
-        // Step 3: Get topological order
-        List<String> order = mongoDAGService.getTopologicalOrder();
-
-        return "Topological Order: " + order.toString();
-    }
-}
+# Iterate through each folder
+for folder in "${folders[@]}"; do
+  # Check if the folder exists
+  if [ -d "$folder" ]; then
+    # Loop through all JSON files in the folder
+    for file in "$folder"/*.json; do
+      # Check if any JSON files exist
+      if [ -f "$file" ]; then
+        # Extract the filename without extension
+        filename=$(basename "$file" .json)
+        # Read the content of the file
+        content=$(<"$file")
+        # Export the filename and content as an environment variable
+        export "$filename"="$content"
+        echo "Exported $filename as environment variable."
+      fi
+    done
+  else
+    echo "Folder $folder does not exist."
+  fi
+done
