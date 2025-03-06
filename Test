@@ -1,21 +1,32 @@
-elastic.apm.enabled=true
-elastic.apm.config.service_name=my-spring-boot-app
-elastic.apm.config.server_url=http://localhost:8200
-elastic.apm.config.secret_token=
-elastic.apm.config.application_packages=com.example
-elastic.apm.config.trace_methods=com.example.service.*,com.example.controller.*
-elastic.apm.config.enable_experimental_instrumentations=true
-elastic.apm.config.capture_jdbc_statements=true
-elastic.apm.config.transaction_sample_rate=0.5
+// Pointcut for MongoTemplate methods, capturing MongoDB operations
+    @Pointcut("execution(* org.springframework.data.mongodb.core.MongoTemplate.*(..))")
+    public void mongoTemplateMethods() {}
 
+    @Around("mongoTemplateMethods()")
+    public Object traceMongoOperation(ProceedingJoinPoint joinPoint) throws Throwable {
+        String methodName = joinPoint.getSignature().getName();
+        Object[] args = joinPoint.getArgs();
 
-@Value("${elastic.apm.enabled:false}")
-    private boolean apmEnabled;
+        // Check if method has a MongoDB query (like find)
+        if (args.length > 0 && args[0] instanceof Query) {
+            Query query = (Query) args[0];
+            // Start an APM span to trace the MongoDB operation
+            Span span = ElasticApm.currentTransaction().startSpan("db", "mongodb", methodName);
+            span.setName("MongoDB " + methodName);
+            span.setLabel("query", query.toString());
 
-    private final Map<String, String> config = new HashMap<>();
-
-    public Map<String, String> getConfig() {
-        return config;
+            try {
+                // Proceed with the original method
+                Object result = joinPoint.proceed();
+                span.end();  // End the span after operation is completed
+                return result;
+            } catch (Exception e) {
+                span.captureException(e); // Capture any exception
+                span.end();
+                throw e;  // Rethrow the exception
+            }
+        } else {
+            // If there is no query, just proceed with the original method
+            return joinPoint.proceed();
+        }
     }
-
-@ConfigurationProperties(prefix = "elastic.apm.config")
