@@ -1,63 +1,72 @@
-import co.elastic.apm.api.ElasticApm;
-import co.elastic.apm.api.Span;
-import org.aspectj.lang.annotation.Aspect;
-import org.aspectj.lang.annotation.Around;
-import org.aspectj.lang.annotation.Pointcut;
-import org.aspectj.lang.ProceedingJoinPoint;
-import org.springframework.stereotype.Component;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Query;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.bson.Document;
+<dependency>
+    <groupId>io.opentelemetry</groupId>
+    <artifactId>opentelemetry-exporter-otlp</artifactId>
+    <version>1.32.0</version>
+</dependency>
+<dependency>
+    <groupId>io.opentelemetry.instrumentation</groupId>
+    <artifactId>opentelemetry-spring-boot-starter</artifactId>
+    <version>1.32.0-alpha</version>
+</dependency>
 
-@Aspect
-@Component
-public class MongoTracingAspect {
 
-    private final MongoTemplate mongoTemplate;
+management:
+  tracing:
+    enabled: true
+  otlp:
+    endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:8200}
+  logs:
+    enabled: true
 
-    public MongoTracingAspect(MongoTemplate mongoTemplate) {
-        this.mongoTemplate = mongoTemplate;
+otel:
+  service:
+    name: ${OTEL_SERVICE_NAME:my-spring-app}
+  exporter:
+    otlp:
+      protocol: grpc
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:8200}
+      headers:
+        Authorization: "Bearer ${ELASTIC_APM_SECRET_TOKEN:}"
+  resource:
+    attributes: "global_label=my-app,environment=${ENVIRONMENT:production}"
+
+
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.sdk.resources.Resource;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import org.springframework.stereotype.Service;
+
+@Service
+public class TracingService {
+    private boolean tracingEnabled = false;
+    private OpenTelemetrySdk openTelemetry;
+
+    public void enableTracing() {
+        if (!tracingEnabled) {
+            Resource resource = Resource.getDefault().toBuilder()
+                    .put(AttributeKey.stringKey("global_label"), System.getenv().getOrDefault("GLOBAL_LABEL", "my-app"))
+                    .put(AttributeKey.stringKey("environment"), System.getenv().getOrDefault("ENVIRONMENT", "production"))
+                    .build();
+
+            openTelemetry = OpenTelemetrySdk.builder()
+                    .setTracerProvider(SdkTracerProvider.builder().setResource(resource).build())
+                    .build();
+
+            GlobalOpenTelemetry.set(openTelemetry);
+            tracingEnabled = true;
+        }
     }
 
-    // Pointcut for MongoTemplate methods, capturing MongoDB operations
-    @Pointcut("execution(* org.springframework.data.mongodb.core.MongoTemplate.*(..))")
-    public void mongoTemplateMethods() {}
-
-    @Around("mongoTemplateMethods()")
-    public Object traceMongoOperation(ProceedingJoinPoint joinPoint) throws Throwable {
-        String methodName = joinPoint.getSignature().getName();
-        Object[] args = joinPoint.getArgs();
-        String collectionName = "Unknown Collection";
-        String databaseName = mongoTemplate.getDb().getName(); // Extract database name
-
-        // Check if the method has a collection name parameter
-        for (Object arg : args) {
-            if (arg instanceof String) {
-                collectionName = (String) arg;
-                break;
-            }
+    public void disableTracing() {
+        if (tracingEnabled) {
+            openTelemetry.close();
+            tracingEnabled = false;
         }
+    }
 
-        Span span = ElasticApm.currentTransaction().startSpan("db", "mongodb", methodName);
-        span.setName("MongoDB " + methodName);
-        span.setLabel("database", databaseName);
-        span.setLabel("collection", collectionName);
-
-        // Check if method has a MongoDB query (like find)
-        if (args.length > 0 && args[0] instanceof Query) {
-            Query query = (Query) args[0];
-            span.setLabel("query", query.toString());  // Capture MongoDB query
-        }
-
-        try {
-            Object result = joinPoint.proceed(); // Proceed with the original method
-            span.end();
-            return result;
-        } catch (Exception e) {
-            span.captureException(e); // Capture exception details
-            span.end();
-            throw e;
-        }
+    public boolean isTracingEnabled() {
+        return tracingEnabled;
     }
 }
