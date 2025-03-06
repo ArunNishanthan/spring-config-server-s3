@@ -1,4 +1,26 @@
-// Pointcut for MongoTemplate methods, capturing MongoDB operations
+import co.elastic.apm.api.ElasticApm;
+import co.elastic.apm.api.Span;
+import org.aspectj.lang.annotation.Aspect;
+import org.aspectj.lang.annotation.Around;
+import org.aspectj.lang.annotation.Pointcut;
+import org.aspectj.lang.ProceedingJoinPoint;
+import org.springframework.stereotype.Component;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.bson.Document;
+
+@Aspect
+@Component
+public class MongoTracingAspect {
+
+    private final MongoTemplate mongoTemplate;
+
+    public MongoTracingAspect(MongoTemplate mongoTemplate) {
+        this.mongoTemplate = mongoTemplate;
+    }
+
+    // Pointcut for MongoTemplate methods, capturing MongoDB operations
     @Pointcut("execution(* org.springframework.data.mongodb.core.MongoTemplate.*(..))")
     public void mongoTemplateMethods() {}
 
@@ -6,27 +28,36 @@
     public Object traceMongoOperation(ProceedingJoinPoint joinPoint) throws Throwable {
         String methodName = joinPoint.getSignature().getName();
         Object[] args = joinPoint.getArgs();
+        String collectionName = "Unknown Collection";
+        String databaseName = mongoTemplate.getDb().getName(); // Extract database name
+
+        // Check if the method has a collection name parameter
+        for (Object arg : args) {
+            if (arg instanceof String) {
+                collectionName = (String) arg;
+                break;
+            }
+        }
+
+        Span span = ElasticApm.currentTransaction().startSpan("db", "mongodb", methodName);
+        span.setName("MongoDB " + methodName);
+        span.setLabel("database", databaseName);
+        span.setLabel("collection", collectionName);
 
         // Check if method has a MongoDB query (like find)
         if (args.length > 0 && args[0] instanceof Query) {
             Query query = (Query) args[0];
-            // Start an APM span to trace the MongoDB operation
-            Span span = ElasticApm.currentTransaction().startSpan("db", "mongodb", methodName);
-            span.setName("MongoDB " + methodName);
-            span.setLabel("query", query.toString());
+            span.setLabel("query", query.toString());  // Capture MongoDB query
+        }
 
-            try {
-                // Proceed with the original method
-                Object result = joinPoint.proceed();
-                span.end();  // End the span after operation is completed
-                return result;
-            } catch (Exception e) {
-                span.captureException(e); // Capture any exception
-                span.end();
-                throw e;  // Rethrow the exception
-            }
-        } else {
-            // If there is no query, just proceed with the original method
-            return joinPoint.proceed();
+        try {
+            Object result = joinPoint.proceed(); // Proceed with the original method
+            span.end();
+            return result;
+        } catch (Exception e) {
+            span.captureException(e); // Capture exception details
+            span.end();
+            throw e;
         }
     }
+}
