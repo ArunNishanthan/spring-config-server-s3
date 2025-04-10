@@ -1,1 +1,89 @@
+Freezed
+1. doMain
+    1. checkMain
+        1. checkInputData
+            1. check which account to freeze *1
+            2. getRestrictProperty - Obtain the earmark Category parameter *2
+            3. checkValidValue - check for earmark reason *3
+            4. handle law enforcement earmark - can be removed
+            5. qryCustBasicInfo 
+                1. Get customer detail *4
+        2. checkFreeze
+            1. getRestrictProperty *2
+            2. checkFrozeObject
+                1. designated sub account
+                    1. locateSubAcct
+                        1. If earmark by account
+                            1. Kdpa_acct_routeDao.selectOne_odb1 ==》 using cust_acct_num
+                            2. Kdpa_acctDao.selectOneWithLock_odb1 ==》 lock Kdpa_acct using cust_acct_num and cust_num.
+                        2. If earmark by card
+                            1. Kdpa_cardDao.selectOne_odb1 - get card from kdpa_card based on custNum and accNum
+                            2. Kdpa_acctDao.selectOneWithLock_odb1 ==》 lock Kdpa_acct using cust_acct_num and cust_num.
+                        3. if term_dmd_flg == null set as Current / Savings Account
+                            1. Kdpf_basic_attrDao.selectOneWithLock_odb1 -》 lock kdpf_basic_attr using productCode
+                        4. get deposit account type
+                        5. DpAccountBasicSqlDao.locateSubAcct -》  *5
+                            1. locate subaccount from Kdpa_acct_cmprsDao.selectOne_odb1 if previous condition return null
+                        6. isAutoOpenForeignCcySubAcct
+                            1. Kdpp_acct_typeDao.selectOne_odb1 -》 Get customer account type *6
+                            2. Kdpf_basic_attrDao.selectOneWithLock_odb1 -》 lock kdpf_basic_attr using productCode why?
+                    2. Kdpa_sub_acctDao.selectOneWithLock_odb3 ==》 lock Kdpa_sub_acct using cust_acct_num and cust_num.
+                    3. calcBalance
+						1. get subaccount
+                        2. accountInquery
+							if (account)
+								1. kdpa_acct_route = Kdpa_acct_routeDao.selectOne_odb1 ==》 using cust_acct_num
+								2. kdpa_acct = Kdpa_acctDao.selectOne_odb1 ==》 Kdpa_acct using cust_acct_num and cust_num.
+							else
+								1. kdpa_card -  Kdpa_cardDao.selectOne_odb1
+								2. kdpa_acct = Kdpa_acctDao.selectOne_odb1 ==》 Kdpa_acct using tblCardInfo.cust_acct_num and cust_num.
+						3. CalcFrozeAmount
+							1. getHotspotDelayAmount 
+							2. if frozenumber is available - set unfrozenumber in DpChequeHoldInfo
+							3. getDrawLimitFrozeStatisInfo
+								1. tblAcctInfo
+									if (card)
+										get card ref id
+								2. listFrozeInfo - selectAll(namedsql_selAllDrawLimitFrozeStatisInfo
+									1. DpUnfrozeAnalyResult cplUnfrozeInfo = analyzeUnfrozeInfo
+								do manipulation
+							4. getFrozeBalanceInfo
+					4. if main account is frozen and if it is pool linked - get pool balance 
+					5. else  DpBalanceLockBaseSqlDao.selAllLockAmtByLbltyAcct - 
+							cplOut.setAval_bal(cplOut.getAcct_bal().subtract(cplOut.getTotl_rstct_amt()).subtract(bigBalanceLockAmount).subtract(tblSubAccount.getAcct_flt_bal()));
+					6.  DpOvdfBasicSqlDao.selAcctOvdfTotalLmt		
+				2， if its account setCust_num, setCust_tp
+			3. checkFrozeAmount - validating amount
+			4. checkFrozeMature - to set the maturitydate
+			5. checkRestrictExclusion
+				1. kdpp_rstct_catg_excl - global cache
+				2. check for any freeze entry in Kdpb_frz table
+				3. if restriction ctag = already frozen, then throw error
+				
+			6. get kdpp_rstct_catg global cache
+			7. generate sFrozeNo [global cache]
+			8. registerFreeze - 
+				1. getFrozeObjectList 
+					kdpa_acct_cmprs - why all subaccounts?
+				2. calcFrozeScaler - Kdpb_frz_scalerDao.selectOneWithLock_odb1 = if null insert or update 
+				3. registerFrozeRecord - save  - kdpb_frz
+			9. registerFrozeDetail - save - kdpl_acct_frz
 
+Freeze cancel | DpFreezeCancelOut
+	doMain
+		1. checkMain
+			1. validate
+			2. getFrozeRecord from DB
+			3. checkLawFroze - if needed
+			4. checkUnfreeze 
+				1. checkUnFrozeAmount
+				2. checkSpecialInfo - check for restriction in unfreeze
+		2.  DpFrozeUtil.cancelFreeze
+			1. unfrozeAmtHandl - set unfreeze amount
+			2. modifyFroze - set freeze type and set the amount 
+				1. save - Kdpb_frz
+		3. Kdpb_frzDao.selectOneWithLock_odb1
+		4. registerUnfrozeDetail
+			1. save Kdpl_acct_unfrz
+		5. fetch accoun\
+		xzs1                                 
